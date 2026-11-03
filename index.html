@@ -68,6 +68,7 @@ input[type=text],input[type=password]{width:100%;padding:7px;border:1px solid va
 <header>
   <h1>Ferie tecnici</h1>
   <div class="hright">
+    <button id="btnSync" title="Stato sincronizzazione">⚪</button>
     <button id="btnUser" class="user" title="Cambia tecnico">👤 —</button>
     <button id="btnInfo">Info</button>
   </div>
@@ -138,7 +139,9 @@ input[type=text],input[type=password]{width:100%;padding:7px;border:1px solid va
   <label class="f">Branch</label><input type="text" id="ghBranch">
   <label class="f">File dati</label><input type="text" id="ghPath">
   <label class="f">Token (resta solo in questo browser)</label><input type="password" id="ghToken" placeholder="github_pat_…">
+  <div id="ghTest" class="muted" style="margin-top:10px;white-space:pre-line"></div>
   <div class="actions">
+    <button id="ghVerify">Verifica</button>
     <button id="ghOff">Disattiva</button>
     <button id="ghCancel">Annulla</button>
     <button id="ghSave" class="primary">Salva</button>
@@ -147,7 +150,7 @@ input[type=text],input[type=password]{width:100%;padding:7px;border:1px solid va
 
 <script>
 /* ===== CONFIGURAZIONE ===== */
-const REVISIONE = {n:'1.4', data:'03/11/2026'};
+const REVISIONE = {n:'1.4.1', data:'03/11/2026'};
 const TECNICI = [
   {id:'MC', nome:'Manuel Celeghin',                 tel:true,  fire:true,  intr:false, note:'solo fire'},
   {id:'BV', nome:'Andrea Pellicciari "Bella Vita"', tel:true,  fire:false, intr:true,  note:'solo intrusione'},
@@ -184,8 +187,14 @@ function chiusura(d){
   if (d.getDay()===0 || d.getDay()===6) return '';
   return null;
 }
-function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.display='block'; clearTimeout(toast.h); toast.h=setTimeout(()=>t.style.display='none',3000); }
-function setSync(msg, cls=''){ $('syncState').textContent=msg; $('syncState').className='sync muted '+cls; }
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.display='block'; clearTimeout(toast.h); toast.h=setTimeout(()=>t.style.display='none',msg.length>40?7000:3000); }
+function setSync(msg, cls=''){
+  $('syncState').textContent=msg; $('syncState').className='sync muted '+cls;
+  const wait=(typeof PENDING!=='undefined')?PENDING.filter(p=>!p.pushed).length:0;
+  let icon='⚪';
+  if(cls==='err') icon='🔴'; else if(cls==='ok') icon = (wait||!GH.token) ? '🟡' : '🟢';
+  $('btnSync').textContent=icon+(wait?' '+wait:''); $('btnSync').title=msg;
+}
 
 /* ===== STATO ===== */
 let DATA={}, GH=Object.assign({},GH_DEFAULT), ME=null;
@@ -330,15 +339,16 @@ const b64dec = s => decodeURIComponent(escape(atob(s.replace(/\n/g,''))));
 function ghHeaders(){ const h={'Accept':'application/vnd.github+json'}; if(GH.token) h.Authorization='Bearer '+GH.token; return h; }
 const ghUrl = () => `https://api.github.com/repos/${GH.owner}/${GH.repo}/contents/${GH.path}`;
 const ERR = {401:'token non valido o scaduto', 403:'token senza permesso di scrittura su questo repo', 404:'repository non trovato o token non abilitato su questo repo'};
+async function ghErr(r){ let m=''; try{ m=(await r.json()).message||''; }catch(e){} return new Error((ERR[r.status]||('GitHub '+r.status))+(m?' ['+m+']':'')); }
 async function ghGet(){
   const r=await fetch(`${ghUrl()}?ref=${encodeURIComponent(GH.branch)}`,{headers:ghHeaders(),cache:'no-store'});
   if(r.status===404){
     // file assente o repo sbagliato? Verifico il repo prima di considerare il calendario vuoto
     const rr=await fetch(`https://api.github.com/repos/${GH.owner}/${GH.repo}`,{headers:ghHeaders(),cache:'no-store'});
-    if(!rr.ok) throw new Error(ERR[rr.status]||('GitHub '+rr.status));
+    if(!rr.ok) throw await ghErr(rr);
     return {data:{}, sha:null, missing:true};
   }
-  if(!r.ok) throw new Error(ERR[r.status]||('GitHub '+r.status));
+  if(!r.ok) throw await ghErr(r);
   const j=await r.json();
   return {data:fromCSV(b64dec(j.content)), sha:j.sha};
 }
@@ -361,7 +371,7 @@ async function pushPending(){
         setSync('Sincronizzato '+new Date().toLocaleTimeString('it-IT'),'ok'); toast('Salvato su GitHub');
         return true;
       }
-      if(r.status!==409 && r.status!==422) throw new Error(ERR[r.status]||('GitHub '+r.status));
+      if(r.status!==409) throw await ghErr(r);
     }catch(err){
       setSync(`Errore: ${err.message} – ${todo.length} modifiche in attesa`,'err');
       toast('Non salvato su GitHub: '+err.message+' (resta in locale)');
@@ -384,8 +394,32 @@ async function refresh(){
 }
 const ghFields=['owner','repo','branch','path','token'];
 const fld = n => $('gh'+n[0].toUpperCase()+n.slice(1));
-$('btnGh').onclick=()=>{ ghFields.forEach(n=>fld(n).value=GH[n]||''); $('dlgGh').showModal(); };
+function openGh(){ ghFields.forEach(n=>fld(n).value=GH[n]||''); $('ghTest').textContent=''; $('dlgGh').showModal(); }
+$('btnGh').onclick=openGh;
+$('btnSync').onclick=()=>$('dlgInfo').showModal();
 $('ghCancel').onclick=()=>$('dlgGh').close();
+$('ghVerify').onclick=async ()=>{
+  const c={}; ghFields.forEach(n=>c[n]=fld(n).value.trim());
+  const h={'Accept':'application/vnd.github+json'}; if(c.token) h.Authorization='Bearer '+c.token;
+  const out=[]; const show=()=>$('ghTest').textContent=out.join('\n');
+  out.push('Verifica in corso…'); show(); out.length=0;
+  try{
+    const r=await fetch(`https://api.github.com/repos/${c.owner}/${c.repo}`,{headers:h,cache:'no-store'});
+    if(r.status===401){ out.push('❌ Token non valido o scaduto'); return show(); }
+    if(!r.ok){ out.push(`❌ Repository ${c.owner}/${c.repo} non trovato (controlla nome) – ${r.status}`); return show(); }
+    const j=await r.json(); out.push(`✅ Repository trovato (${j.private?'privato':'pubblico'})`);
+    if(!c.token) out.push('⚠️ Nessun token: solo lettura, le modifiche restano in questo browser');
+    else if(j.permissions?.push) out.push('✅ Token con permesso di scrittura');
+    else out.push('❌ Token senza scrittura su questo repo: abilita il repo nel token e Contents = Read and write');
+    const b=await fetch(`https://api.github.com/repos/${c.owner}/${c.repo}/branches/${encodeURIComponent(c.branch)}`,{headers:h,cache:'no-store'});
+    out.push(b.ok?`✅ Branch "${c.branch}" presente`:`❌ Branch "${c.branch}" non trovato (repo vuoto? crea un README)`);
+    const f=await fetch(`https://api.github.com/repos/${c.owner}/${c.repo}/contents/${c.path}?ref=${encodeURIComponent(c.branch)}`,{headers:h,cache:'no-store'});
+    out.push(f.ok?`✅ File ${c.path} presente`:`ℹ️ File ${c.path} non ancora creato (si crea al primo salvataggio con token)`);
+    const wait=PENDING.filter(p=>!p.pushed).length;
+    if(wait) out.push(`ℹ️ ${wait} modifiche in attesa di invio: premi Salva per inviarle`);
+  }catch(err){ out.push('❌ Errore di rete: '+err.message); }
+  show();
+};
 $('ghSave').onclick=()=>{ ghFields.forEach(n=>GH[n]=fld(n).value.trim()); GH.on=true; try{localStorage.setItem('ferie_gh',JSON.stringify(GH));}catch(e){} $('dlgGh').close(); refresh(); };
 $('ghOff').onclick=()=>{ GH.on=false; try{localStorage.setItem('ferie_gh',JSON.stringify(GH));}catch(e){} $('dlgGh').close(); refresh(); };
 
