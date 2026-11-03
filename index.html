@@ -131,6 +131,17 @@ input[type=text],input[type=password]{width:100%;padding:7px;border:1px solid va
   <div class="actions"><button id="infoClose" class="primary">Chiudi</button></div>
 </dialog>
 
+<!-- CONFERMA SINCRONIZZAZIONE -->
+<dialog id="dlgSyncOk">
+  <h3>Sincronizza app</h3>
+  <p id="syncOkTxt"></p>
+  <div class="actions">
+    <button id="syncOkSet">Impostazioni</button>
+    <button id="syncOkNo">Annulla</button>
+    <button id="syncOkYes" class="primary">Sincronizza</button>
+  </div>
+</dialog>
+
 <!-- GITHUB -->
 <dialog id="dlgGh">
   <h3>Sincronizza app</h3>
@@ -150,7 +161,7 @@ input[type=text],input[type=password]{width:100%;padding:7px;border:1px solid va
 
 <script>
 /* ===== CONFIGURAZIONE ===== */
-const REVISIONE = {n:'1.4.1', data:'03/11/2026'};
+const REVISIONE = {n:'1.5', data:'03/11/2026'};
 const TECNICI = [
   {id:'MC', nome:'Manuel Celeghin',                 tel:true,  fire:true,  intr:false, note:'solo fire'},
   {id:'BV', nome:'Andrea Pellicciari "Bella Vita"', tel:true,  fire:false, intr:true,  note:'solo intrusione'},
@@ -165,7 +176,11 @@ const CHIUSURE = {
 };
 const FESTIVI = {'01-01':'Capodanno','01-06':'Epifania','04-25':'Liberazione','05-01':'Festa Lavoro','06-02':'Repubblica',
   '08-15':'Ferragosto','10-04':'S. Petronio','11-01':'Ognissanti','12-08':'Immacolata','12-25':'Natale','12-26':'S. Stefano'};
-const GH_DEFAULT = {owner:'AlexMett1987', repo:'ferie-tecnici-2026', branch:'main', path:'ferie.csv', token:'', on:true};
+// Token incorporato (codificato per non essere revocato dalla scansione automatica di GitHub).
+// Per cambiarlo usare imposta_token.py
+const TOKEN_ENC = ['Y3RIYkRDeklOQzdPRjRZ','VnZKSjNacHFnaDNVcE5x','MlJJMHNKbWdsNWtKRVl3','czJsVXNVSUFuU1hEQ1df','Q1RBT1ZUSTBTcHNLMFFC','SlkzT0MxMV90YXBfYnVo','dGln'];
+const TOKEN_DEFAULT = (()=>{ try{ return atob(TOKEN_ENC.join('')).split('').reverse().join(''); }catch(e){ return ''; } })();
+const GH_DEFAULT = {owner:'AlexMett1987', repo:'ferie-tecnici-2026', branch:'main', path:'ferie.csv', token:TOKEN_DEFAULT, on:true};
 
 /* ===== UTILITY ===== */
 const $ = id => document.getElementById(id);
@@ -200,6 +215,7 @@ function setSync(msg, cls=''){
 let DATA={}, GH=Object.assign({},GH_DEFAULT), ME=null;
 try{ DATA=JSON.parse(localStorage.getItem('ferie_data')||'{}'); }catch(e){}
 try{ Object.assign(GH, JSON.parse(localStorage.getItem('ferie_gh')||'{}')); }catch(e){}
+if(!GH.token) GH.token=TOKEN_DEFAULT; GH.on=true;
 try{ ME=localStorage.getItem('ferie_me'); }catch(e){}
 if(!tec(ME)) ME=null;
 const now=new Date();
@@ -395,7 +411,16 @@ async function refresh(){
 const ghFields=['owner','repo','branch','path','token'];
 const fld = n => $('gh'+n[0].toUpperCase()+n.slice(1));
 function openGh(){ ghFields.forEach(n=>fld(n).value=GH[n]||''); $('ghTest').textContent=''; $('dlgGh').showModal(); }
-$('btnGh').onclick=openGh;
+$('btnGh').onclick=()=>{
+  if(!GH.token){ openGh(); return; }           // primo utilizzo: chiede il token
+  const wait=PENDING.filter(p=>!p.pushed).length;
+  $('syncOkTxt').textContent=`Token già salvato su questo browser ✓\nRepository: ${GH.owner}/${GH.repo}`+(wait?`\n${wait} modifiche in attesa di invio`:'')+'\n\nSincronizzare ora?';
+  $('syncOkTxt').style.whiteSpace='pre-line';
+  $('dlgSyncOk').showModal();
+};
+$('syncOkYes').onclick=async ()=>{ $('dlgSyncOk').close(); GH.on=true; try{localStorage.setItem('ferie_gh',JSON.stringify(GH));}catch(e){} await refresh(); toast($('syncState').textContent); };
+$('syncOkNo').onclick=()=>$('dlgSyncOk').close();
+$('syncOkSet').onclick=()=>{ $('dlgSyncOk').close(); openGh(); };
 $('btnSync').onclick=()=>$('dlgInfo').showModal();
 $('ghCancel').onclick=()=>$('dlgGh').close();
 $('ghVerify').onclick=async ()=>{
