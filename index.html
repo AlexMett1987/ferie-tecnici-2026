@@ -147,7 +147,7 @@ input[type=text],input[type=password]{width:100%;padding:7px;border:1px solid va
 
 <script>
 /* ===== CONFIGURAZIONE ===== */
-const REVISIONE = {n:'1.3', data:'03/11/2026'};
+const REVISIONE = {n:'1.4', data:'03/11/2026'};
 const TECNICI = [
   {id:'MC', nome:'Manuel Celeghin',                 tel:true,  fire:true,  intr:false, note:'solo fire'},
   {id:'BV', nome:'Andrea Pellicciari "Bella Vita"', tel:true,  fire:false, intr:true,  note:'solo intrusione'},
@@ -196,6 +196,17 @@ if(!tec(ME)) ME=null;
 const now=new Date();
 let cur = now < new Date(2026,11,1) ? new Date(2026,11,1) : new Date(now.getFullYear(), now.getMonth(), 1);
 const saveLocal = () => { try{ localStorage.setItem('ferie_data', JSON.stringify(DATA)); }catch(e){} };
+// Modifiche fatte in questo browser: restano finché GitHub non le conferma (nessuna perdita dati)
+let PENDING=[];
+try{ PENDING=JSON.parse(localStorage.getItem('ferie_pending')||'[]'); }catch(e){}
+const savePending = () => { try{ localStorage.setItem('ferie_pending', JSON.stringify(PENDING)); }catch(e){} };
+const HOLD_MS = 3*60*1000; // dopo il salvataggio la modifica resta visibile anche se GitHub risponde ancora con la versione vecchia (cache)
+function applyPending(data){
+  const t=Date.now();
+  PENDING = PENDING.filter(p => !p.pushed || t-p.ts < HOLD_MS);
+  PENDING.forEach(p => applyMine(data, p.k, p.ferie, p.turno, p.who));
+  savePending();
+}
 
 /* ===== CSV ===== */
 function toCSV(d){
@@ -294,21 +305,23 @@ $('chkFerie').onchange=updDay;
 $('dayCancel').onclick=()=>$('dlgDay').close();
 
 // applica SOLO la scelta del tecnico loggato sopra i dati esistenti
-function applyMine(data, k, ferie, turno){
-  const e=data[k]||{f:[],t:''};
-  e.f=e.f.filter(id=>id!==ME); if(ferie) e.f.push(ME);
-  if(turno && (!e.t || e.t===ME)) e.t=ME;
-  if(!turno && e.t===ME) e.t='';
+function applyMine(data, k, ferie, turno, who=ME){
+  const e=data[k] ? {f:[...data[k].f], t:data[k].t} : {f:[],t:''};
+  e.f=e.f.filter(id=>id!==who); if(ferie) e.f.push(who);
+  if(turno && (!e.t || e.t===who)) e.t=who;
+  if(!turno && e.t===who) e.t='';
   if(e.f.length||e.t) data[k]=e; else delete data[k];
 }
 $('daySave').onclick=async ()=>{
   const ferie=$('chkFerie').checked, turno=$('chkTurno').checked && !$('chkTurno').disabled;
   $('dlgDay').close();
-  applyMine(DATA, editKey, ferie, turno); saveLocal(); render();
-  if(GH.on){
-    if(!GH.token){ toast('Sola lettura: manca il token (Info → Sincronizza app)'); return; }
-    await ghSaveDay(editKey, ferie, turno);
-  }
+  applyMine(DATA, editKey, ferie, turno); saveLocal();
+  PENDING = PENDING.filter(p=>!(p.k===editKey && p.who===ME));
+  PENDING.push({k:editKey, ferie, turno, who:ME, ts:Date.now(), pushed:false});
+  savePending(); render();
+  if(!GH.on){ toast('Salvato solo in questo browser'); return; }
+  if(!GH.token){ toast('Salvato in locale: manca il token (Info → Sincronizza app)'); return; }
+  await pushPending();
 };
 
 /* ===== GITHUB ===== */
@@ -316,35 +329,58 @@ const b64enc = s => btoa(unescape(encodeURIComponent(s)));
 const b64dec = s => decodeURIComponent(escape(atob(s.replace(/\n/g,''))));
 function ghHeaders(){ const h={'Accept':'application/vnd.github+json'}; if(GH.token) h.Authorization='Bearer '+GH.token; return h; }
 const ghUrl = () => `https://api.github.com/repos/${GH.owner}/${GH.repo}/contents/${GH.path}`;
+const ERR = {401:'token non valido o scaduto', 403:'token senza permesso di scrittura su questo repo', 404:'repository non trovato o token non abilitato su questo repo'};
 async function ghGet(){
   const r=await fetch(`${ghUrl()}?ref=${encodeURIComponent(GH.branch)}`,{headers:ghHeaders(),cache:'no-store'});
-  if(r.status===404) return {data:{},sha:null};
-  if(!r.ok) throw new Error('GitHub '+r.status);
+  if(r.status===404){
+    // file assente o repo sbagliato? Verifico il repo prima di considerare il calendario vuoto
+    const rr=await fetch(`https://api.github.com/repos/${GH.owner}/${GH.repo}`,{headers:ghHeaders(),cache:'no-store'});
+    if(!rr.ok) throw new Error(ERR[rr.status]||('GitHub '+rr.status));
+    return {data:{}, sha:null, missing:true};
+  }
+  if(!r.ok) throw new Error(ERR[r.status]||('GitHub '+r.status));
   const j=await r.json();
   return {data:fromCSV(b64dec(j.content)), sha:j.sha};
 }
-async function ghSaveDay(k, ferie, turno){
-  toast('Salvataggio…');
+// invia a GitHub tutte le modifiche locali non ancora confermate, sopra la versione più recente
+async function pushPending(){
+  const todo=PENDING.filter(p=>!p.pushed);
+  if(!todo.length) return true;
+  setSync('Salvataggio…');
   for(let i=0;i<3;i++){
     try{
       const {data,sha}=await ghGet();
-      applyMine(data, k, ferie, turno);
-      const body={message:`${ME} ${k}: ${ferie?'ferie':'presente'}${turno?' + turno':''}`, content:b64enc(toCSV(data)), branch:GH.branch};
+      todo.forEach(p=>applyMine(data, p.k, p.ferie, p.turno, p.who));
+      const msg = todo.map(p=>`${p.who} ${p.k}: ${p.ferie?'ferie':'presente'}${p.turno?' + turno':''}`).join(' | ');
+      const body={message:msg.slice(0,200), content:b64enc(toCSV(data)), branch:GH.branch};
       if(sha) body.sha=sha;
       const r=await fetch(ghUrl(),{method:'PUT',headers:{...ghHeaders(),'Content-Type':'application/json'},body:JSON.stringify(body)});
-      if(r.ok){ DATA=data; saveLocal(); render(); setSync('Salvato '+new Date().toLocaleTimeString('it-IT'),'ok'); toast('Salvato'); return; }
-      if(r.status!==409 && r.status!==422) throw new Error('GitHub '+r.status);
-    }catch(err){ setSync('Errore: '+err.message,'err'); toast('Errore salvataggio: '+err.message); return; }
+      if(r.ok){
+        const t=Date.now(); todo.forEach(p=>{p.pushed=true; p.ts=t;}); savePending();
+        DATA=data; saveLocal(); render();
+        setSync('Sincronizzato '+new Date().toLocaleTimeString('it-IT'),'ok'); toast('Salvato su GitHub');
+        return true;
+      }
+      if(r.status!==409 && r.status!==422) throw new Error(ERR[r.status]||('GitHub '+r.status));
+    }catch(err){
+      setSync(`Errore: ${err.message} – ${todo.length} modifiche in attesa`,'err');
+      toast('Non salvato su GitHub: '+err.message+' (resta in locale)');
+      return false;
+    }
   }
-  toast('Conflitto di salvataggio, riprova');
+  toast('Conflitto di salvataggio, riprova'); return false;
 }
 async function refresh(){
   if(!GH.on){ setSync('Modalità locale (solo questo browser)'); render(); return; }
   setSync('Caricamento…');
   try{
-    const {data}=await ghGet(); DATA=data; saveLocal(); render();
-    setSync((GH.token?'Sincronizzato ':'Sola lettura · ')+new Date().toLocaleTimeString('it-IT'),'ok');
-  }catch(err){ render(); setSync('Errore lettura: '+err.message,'err'); }
+    const {data}=await ghGet();
+    applyPending(data);              // le mie modifiche non confermate non vengono perse
+    DATA=data; saveLocal(); render();
+    const wait=PENDING.filter(p=>!p.pushed).length;
+    if(wait && GH.token){ await pushPending(); return; }
+    setSync((GH.token?'Sincronizzato ':'Sola lettura · ')+new Date().toLocaleTimeString('it-IT')+(wait?` – ${wait} modifiche solo locali`:''),'ok');
+  }catch(err){ render(); setSync('Errore lettura: '+err.message+' (dati locali mantenuti)','err'); }
 }
 const ghFields=['owner','repo','branch','path','token'];
 const fld = n => $('gh'+n[0].toUpperCase()+n.slice(1));
