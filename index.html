@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ferie Tecnici</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{
+  --bg:#f6f7f9;--card:#fff;--text:#1d2329;--muted:#6b7580;--border:#dde1e6;
+  --ok:#dff3e4;--ok-b:#3a9a57;--parz:#fff3cd;--parz-b:#c99a06;--ko:#fde0e0;--ko-b:#c83737;
+  --closed:#eceef1;--chip:#c83737;--chip-t:#fff;--turno:#1f5fbf;--accent:#1f5fbf;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#14181d;--card:#1d232a;--text:#e6e9ec;--muted:#9aa4ae;--border:#2e363f;
+  --ok:#183a24;--ok-b:#4fbf72;--parz:#3d3415;--parz-b:#e0b52c;--ko:#45201f;--ko-b:#ef6b6b;
+  --closed:#252b32;--chip:#d9534f;--chip-t:#fff;--turno:#6ea8ff;--accent:#6ea8ff;}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--border)}
+h1{font-size:16px;margin:0}
+.hright{display:flex;gap:6px;align-items:center}
+main{max-width:1000px;margin:0 auto;padding:10px 16px 40px}
+.nav{display:flex;align-items:center;justify-content:center;gap:12px;margin:4px 0 10px}
+.nav h2{margin:0;font-size:18px;min-width:170px;text-align:center;text-transform:capitalize}
+button{background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:7px 11px;font:inherit;cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button:disabled{opacity:.5;cursor:default}
+.user{font-weight:600}
+.weekdays,.grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.weekdays div{text-align:center;font-size:12px;color:var(--muted);padding:2px 0}
+.cell{min-height:80px;background:var(--card);border:1px solid var(--border);border-left-width:4px;border-radius:6px;padding:4px;cursor:pointer;display:flex;flex-direction:column;gap:3px;overflow:hidden}
+.cell.empty{background:transparent;border:none;cursor:default}
+.cell.closed{background:var(--closed);cursor:default;color:var(--muted)}
+.cell.ok{border-left-color:var(--ok-b);background:var(--ok)}
+.cell.parz{border-left-color:var(--parz-b);background:var(--parz)}
+.cell.ko{border-left-color:var(--ko-b);background:var(--ko)}
+.cell.today .n{text-decoration:underline}
+.n{font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:2px}
+.chip{background:var(--chip);color:var(--chip-t);border-radius:4px;font-size:10px;font-weight:600;padding:1px 4px}
+.chip.me{outline:2px solid var(--text)}
+.tel{font-size:11px;font-weight:600;color:var(--turno)}
+.warn{font-size:10px;color:var(--ko-b);font-weight:600}
+dialog{border:1px solid var(--border);border-radius:10px;background:var(--card);color:var(--text);width:min(460px,94vw);max-height:90vh;padding:16px}
+dialog::backdrop{background:#0007}
+dialog h3{margin:0 0 10px}
+dialog h4{margin:14px 0 6px;font-size:13px}
+.cap{text-transform:capitalize}
+.row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)}
+.muted{color:var(--muted);font-size:13px}
+.legend{display:flex;flex-direction:column;gap:4px;font-size:13px}
+.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px;background:var(--c)}
+ul{margin:0;padding-left:18px}
+li.ko{color:var(--ko-b)}li.parz{color:var(--parz-b)}
+.btns{display:flex;flex-wrap:wrap;gap:6px}
+.techbtn{display:block;width:100%;text-align:left;padding:12px;margin-bottom:6px}
+label.f{display:block;margin:8px 0 2px;font-size:12px;color:var(--muted)}
+input[type=text],input[type=password]{width:100%;padding:7px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font:inherit}
+.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+#copPrev{margin-top:10px;font-weight:600}
+.sync.err{color:var(--ko-b)}.sync.ok{color:var(--ok-b)}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;display:none;z-index:9}
+@media (max-width:600px){.cell{min-height:60px;padding:3px}.chip{font-size:9px;padding:0 3px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Ferie tecnici</h1>
+  <div class="hright">
+    <button id="btnUser" class="user" title="Cambia tecnico">👤 —</button>
+    <button id="btnInfo">Info</button>
+  </div>
+</header>
+<main>
+  <div class="nav">
+    <button id="prev" aria-label="Mese precedente">‹</button>
+    <h2 id="monthLabel"></h2>
+    <button id="next" aria-label="Mese successivo">›</button>
+  </div>
+  <div class="weekdays"><div>Lun</div><div>Mar</div><div>Mer</div><div>Gio</div><div>Ven</div><div>Sab</div><div>Dom</div></div>
+  <div class="grid" id="grid"></div>
+</main>
+<div id="toast"></div>
+
+<!-- LOGIN -->
+<dialog id="dlgLogin">
+  <h3>Chi sei?</h3>
+  <div id="loginList"></div>
+</dialog>
+
+<!-- GIORNO -->
+<dialog id="dlgDay">
+  <h3 id="dayTitle" class="cap"></h3>
+  <div id="dayOthers" class="muted"></div>
+  <label class="row"><input type="checkbox" id="chkFerie"> <span>Sono in ferie</span></label>
+  <label class="row" id="rowTurno"><input type="checkbox" id="chkTurno"> <span id="lblTurno">Faccio io il turno di assistenza telefonica</span></label>
+  <div id="copPrev"></div>
+  <div class="actions">
+    <button id="dayCancel">Annulla</button>
+    <button id="daySave" class="primary">Salva</button>
+  </div>
+</dialog>
+
+<!-- INFO -->
+<dialog id="dlgInfo">
+  <h3>Info</h3>
+  <div class="sync muted" id="syncState">Locale</div>
+  <h4>Legenda</h4>
+  <div class="legend">
+    <span style="--c:var(--ok-b)">Assistenza coperta (fire + intrusione)</span>
+    <span style="--c:var(--parz-b)">Copertura parziale</span>
+    <span style="--c:var(--ko-b)">Assistenza scoperta</span>
+    <span style="--c:var(--chip)">Sigle = tecnici in ferie (bordo = tu)</span>
+    <span style="--c:var(--turno)">☎ = turno assistenza telefonica</span>
+    <span style="--c:var(--closed)">Grigio = sede chiusa / festivo</span>
+  </div>
+  <h4>Criticità del mese</h4>
+  <ul id="alerts"></ul>
+  <h4>Tecnici</h4>
+  <ul id="techList"></ul>
+  <h4>Dati</h4>
+  <div class="btns">
+    <button id="btnRefresh">⟳ Aggiorna</button>
+    <button id="btnExpCsv">Esporta CSV</button>
+    <button id="btnExpXlsx">Esporta Excel</button>
+    <button id="btnGh">⟳ Sincronizza app</button>
+  </div>
+  <p class="muted" id="revisione"></p>
+  <div class="actions"><button id="infoClose" class="primary">Chiudi</button></div>
+</dialog>
+
+<!-- GITHUB -->
+<dialog id="dlgGh">
+  <h3>Sincronizza app</h3>
+  <label class="f">Utente / organizzazione</label><input type="text" id="ghOwner">
+  <label class="f">Repository</label><input type="text" id="ghRepo">
+  <label class="f">Branch</label><input type="text" id="ghBranch">
+  <label class="f">File dati</label><input type="text" id="ghPath">
+  <label class="f">Token (resta solo in questo browser)</label><input type="password" id="ghToken" placeholder="github_pat_…">
+  <div class="actions">
+    <button id="ghOff">Disattiva</button>
+    <button id="ghCancel">Annulla</button>
+    <button id="ghSave" class="primary">Salva</button>
+  </div>
+</dialog>
+
+<script>
+/* ===== CONFIGURAZIONE ===== */
+const REVISIONE = {n:'1.2', data:'02/11/2026'};
+const TECNICI = [
+  {id:'MC', nome:'Manuel Celeghin',                 tel:true,  fire:true,  intr:false, note:'solo fire'},
+  {id:'BV', nome:'Andrea Pellicciari "Bella Vita"', tel:true,  fire:false, intr:true,  note:'solo intrusione'},
+  {id:'AP', nome:'Alessandro Poli',                 tel:true,  fire:true,  intr:true,  note:'fire + intrusione'},
+  {id:'AM', nome:'Alessandro Mattioli',             tel:true,  fire:true,  intr:true,  note:'fire + intrusione'},
+  {id:'LP', nome:'Luca Pasquali',                   tel:false, fire:false, intr:false, note:'no assistenza tel.'},
+  {id:'LB', nome:'Luca Bortolazzi',                 tel:false, fire:false, intr:false, note:'no assistenza tel.'},
+];
+const CHIUSURE = {
+  '2026-12-08':'Immacolata','2026-12-24':'Chiuso','2026-12-25':'Natale','2026-12-26':'S. Stefano','2026-12-27':'Chiuso',
+  '2026-12-31':'Chiuso','2027-01-01':'Capodanno','2027-01-02':'Chiuso','2027-01-03':'Chiuso','2027-01-06':'Epifania'
+};
+const FESTIVI = {'01-01':'Capodanno','01-06':'Epifania','04-25':'Liberazione','05-01':'Festa Lavoro','06-02':'Repubblica',
+  '08-15':'Ferragosto','10-04':'S. Petronio','11-01':'Ognissanti','12-08':'Immacolata','12-25':'Natale','12-26':'S. Stefano'};
+const GH_DEFAULT = {owner:'AlexMett1987', repo:'ferie-tecnici', branch:'main', path:'ferie.csv', token:'', on:false};
+
+/* ===== UTILITY ===== */
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2,'0');
+const key = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const tec = id => TECNICI.find(t=>t.id===id);
+const nomeDi = id => (tec(id)||{nome:id}).nome;
+function pasquetta(y){
+  const a=y%19,b=Math.floor(y/100),c=y%100,d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),
+    h=(19*a+b-d-g+15)%30,i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451),
+    mo=Math.floor((h+l-7*m+114)/31),da=((h+l-7*m+114)%31)+1;
+  return key(new Date(y,mo-1,da+1));
+}
+function chiusura(d){
+  const k=key(d);
+  if (CHIUSURE[k]) return CHIUSURE[k];
+  if (FESTIVI[k.slice(5)]) return FESTIVI[k.slice(5)];
+  if (k===pasquetta(d.getFullYear())) return 'Pasquetta';
+  if (d.getDay()===0 || d.getDay()===6) return '';
+  return null;
+}
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.display='block'; clearTimeout(toast.h); toast.h=setTimeout(()=>t.style.display='none',3000); }
+function setSync(msg, cls=''){ $('syncState').textContent=msg; $('syncState').className='sync muted '+cls; }
+
+/* ===== STATO ===== */
+let DATA={}, GH=Object.assign({},GH_DEFAULT), ME=null;
+try{ DATA=JSON.parse(localStorage.getItem('ferie_data')||'{}'); }catch(e){}
+try{ Object.assign(GH, JSON.parse(localStorage.getItem('ferie_gh')||'{}')); }catch(e){}
+try{ ME=localStorage.getItem('ferie_me'); }catch(e){}
+if(!tec(ME)) ME=null;
+const now=new Date();
+let cur = now < new Date(2026,11,1) ? new Date(2026,11,1) : new Date(now.getFullYear(), now.getMonth(), 1);
+const saveLocal = () => { try{ localStorage.setItem('ferie_data', JSON.stringify(DATA)); }catch(e){} };
+
+/* ===== CSV ===== */
+function toCSV(d){
+  const rows=['data;ferie;turno'];
+  Object.keys(d).sort().forEach(k=>{ const e=d[k]; if(!e||(!e.f.length&&!e.t)) return; rows.push(`${k};${e.f.join('|')};${e.t||''}`); });
+  return rows.join('\n')+'\n';
+}
+function fromCSV(txt){
+  const o={};
+  txt.split(/\r?\n/).forEach(l=>{
+    const [k,f,t]=l.split(';');
+    if(!/^\d{4}-\d\d-\d\d$/.test((k||'').trim())) return;
+    o[k.trim()]={f:(f||'').split('|').map(s=>s.trim()).filter(Boolean), t:(t||'').trim()};
+  });
+  return o;
+}
+
+/* ===== COPERTURA ===== */
+function copertura(e){
+  const ferie=new Set(e?.f||[]);
+  const pres=TECNICI.filter(t=>t.tel && !ferie.has(t.id));
+  const fire=pres.some(t=>t.fire), intr=pres.some(t=>t.intr);
+  return {s: fire&&intr?'ok':(fire||intr?'parz':'ko'), fire, intr, turnoInFerie: !!(e?.t && ferie.has(e.t))};
+}
+const descrCop = c => c.s==='ok' ? 'Assistenza coperta' : c.s==='ko' ? 'Assistenza SCOPERTA' : (c.fire ? 'Manca intrusione' : 'Manca fire');
+
+/* ===== RENDER ===== */
+function render(){
+  const y=cur.getFullYear(), m=cur.getMonth();
+  $('monthLabel').textContent=cur.toLocaleDateString('it-IT',{month:'long',year:'numeric'});
+  $('btnUser').textContent='👤 '+(ME||'—');
+  const grid=$('grid'); grid.innerHTML='';
+  const offset=(new Date(y,m,1).getDay()+6)%7, days=new Date(y,m+1,0).getDate();
+  for(let i=0;i<offset;i++){ const c=document.createElement('div'); c.className='cell empty'; grid.appendChild(c); }
+  const alerts=[];
+  for(let dd=1; dd<=days; dd++){
+    const d=new Date(y,m,dd), k=key(d), ch=chiusura(d), e=DATA[k];
+    const c=document.createElement('div'); c.className='cell';
+    if(k===key(now)) c.classList.add('today');
+    let html=`<span class="n">${dd}</span>`;
+    if(ch!==null){ c.classList.add('closed'); c.title=ch||'Weekend'; }
+    else{
+      const cop=copertura(e); c.classList.add(cop.s);
+      if(e?.f?.length) html+=`<div class="chips">${e.f.map(id=>`<span class="chip${id===ME?' me':''}" title="${nomeDi(id)}">${id}</span>`).join('')}</div>`;
+      if(e?.t) html+=`<span class="tel" title="Turno: ${nomeDi(e.t)}">☎ ${e.t}</span>`;
+      if(cop.turnoInFerie) html+=`<span class="warn">!</span>`;
+      if(cop.s!=='ok'||cop.turnoInFerie)
+        alerts.push({s:cop.s==='ok'?'parz':cop.s, txt:`${d.toLocaleDateString('it-IT',{weekday:'short',day:'numeric'})}: ${cop.turnoInFerie?'tecnico di turno in ferie':descrCop(cop)}${e?.f?.length?' (ferie: '+e.f.join(', ')+')':''}`});
+      c.onclick=()=>openDay(d);
+    }
+    c.innerHTML=html; grid.appendChild(c);
+  }
+  $('alerts').innerHTML = alerts.length ? alerts.map(a=>`<li class="${a.s}">${a.txt}</li>`).join('') : '<li>Nessuna criticità</li>';
+}
+$('revisione').textContent = `Revisione ${REVISIONE.n} del ${REVISIONE.data}`;
+$('techList').innerHTML = TECNICI.map(t=>`<li><b>${t.id}</b> – ${t.nome} <span class="muted">(${t.note})</span></li>`).join('');
+
+/* ===== LOGIN (senza password) ===== */
+function openLogin(){
+  $('loginList').innerHTML = TECNICI.map(t=>`<button class="techbtn" data-id="${t.id}"><b>${t.id}</b> – ${t.nome}</button>`).join('');
+  $('loginList').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    ME=b.dataset.id; try{ localStorage.setItem('ferie_me',ME); }catch(e){}
+    $('dlgLogin').close(); render();
+  });
+  $('dlgLogin').showModal();
+}
+$('dlgLogin').addEventListener('cancel', e=>{ if(!ME) e.preventDefault(); }); // obbligatorio scegliere
+$('btnUser').onclick=openLogin;
+
+/* ===== GIORNO: ogni tecnico modifica solo se stesso ===== */
+let editKey=null;
+function openDay(d){
+  if(!ME) return openLogin();
+  editKey=key(d);
+  const e=DATA[editKey]||{f:[],t:''}, me=tec(ME);
+  $('dayTitle').textContent=d.toLocaleDateString('it-IT',{weekday:'long',day:'numeric',month:'long'});
+  const altri=e.f.filter(id=>id!==ME);
+  $('dayOthers').textContent=`In ferie: ${altri.length?altri.join(', '):'nessun altro'} · Turno: ${e.t?nomeDi(e.t):'non assegnato'}`;
+  $('chkFerie').checked=e.f.includes(ME);
+  $('chkTurno').checked=e.t===ME;
+  $('rowTurno').style.display = me.tel ? '' : 'none';
+  updDay();
+  $('dlgDay').showModal();
+}
+function updDay(){
+  const e=DATA[editKey]||{f:[],t:''};
+  const ferie=$('chkFerie').checked;
+  const occupato = e.t && e.t!==ME;
+  if(ferie) $('chkTurno').checked=false;
+  $('chkTurno').disabled = ferie || occupato;
+  $('lblTurno').textContent = occupato ? `Turno già preso da ${e.t}` : 'Faccio io il turno di assistenza telefonica';
+  const f=e.f.filter(id=>id!==ME); if(ferie) f.push(ME);
+  const cop=copertura({f}); $('copPrev').textContent=descrCop(cop); $('copPrev').style.color=`var(--${cop.s}-b)`;
+}
+$('chkFerie').onchange=updDay;
+$('dayCancel').onclick=()=>$('dlgDay').close();
+
+// applica SOLO la scelta del tecnico loggato sopra i dati esistenti
+function applyMine(data, k, ferie, turno){
+  const e=data[k]||{f:[],t:''};
+  e.f=e.f.filter(id=>id!==ME); if(ferie) e.f.push(ME);
+  if(turno && (!e.t || e.t===ME)) e.t=ME;
+  if(!turno && e.t===ME) e.t='';
+  if(e.f.length||e.t) data[k]=e; else delete data[k];
+}
+$('daySave').onclick=async ()=>{
+  const ferie=$('chkFerie').checked, turno=$('chkTurno').checked && !$('chkTurno').disabled;
+  $('dlgDay').close();
+  applyMine(DATA, editKey, ferie, turno); saveLocal(); render();
+  if(GH.on){
+    if(!GH.token){ toast('Sola lettura: manca il token (Info → Sincronizza app)'); return; }
+    await ghSaveDay(editKey, ferie, turno);
+  }
+};
+
+/* ===== GITHUB ===== */
+const b64enc = s => btoa(unescape(encodeURIComponent(s)));
+const b64dec = s => decodeURIComponent(escape(atob(s.replace(/\n/g,''))));
+function ghHeaders(){ const h={'Accept':'application/vnd.github+json'}; if(GH.token) h.Authorization='Bearer '+GH.token; return h; }
+const ghUrl = () => `https://api.github.com/repos/${GH.owner}/${GH.repo}/contents/${GH.path}`;
+async function ghGet(){
+  const r=await fetch(`${ghUrl()}?ref=${encodeURIComponent(GH.branch)}`,{headers:ghHeaders(),cache:'no-store'});
+  if(r.status===404) return {data:{},sha:null};
+  if(!r.ok) throw new Error('GitHub '+r.status);
+  const j=await r.json();
+  return {data:fromCSV(b64dec(j.content)), sha:j.sha};
+}
+async function ghSaveDay(k, ferie, turno){
+  toast('Salvataggio…');
+  for(let i=0;i<3;i++){
+    try{
+      const {data,sha}=await ghGet();
+      applyMine(data, k, ferie, turno);
+      const body={message:`${ME} ${k}: ${ferie?'ferie':'presente'}${turno?' + turno':''}`, content:b64enc(toCSV(data)), branch:GH.branch};
+      if(sha) body.sha=sha;
+      const r=await fetch(ghUrl(),{method:'PUT',headers:{...ghHeaders(),'Content-Type':'application/json'},body:JSON.stringify(body)});
+      if(r.ok){ DATA=data; saveLocal(); render(); setSync('Salvato '+new Date().toLocaleTimeString('it-IT'),'ok'); toast('Salvato'); return; }
+      if(r.status!==409 && r.status!==422) throw new Error('GitHub '+r.status);
+    }catch(err){ setSync('Errore: '+err.message,'err'); toast('Errore salvataggio: '+err.message); return; }
+  }
+  toast('Conflitto di salvataggio, riprova');
+}
+async function refresh(){
+  if(!GH.on){ setSync('Modalità locale (solo questo browser)'); render(); return; }
+  setSync('Caricamento…');
+  try{
+    const {data}=await ghGet(); DATA=data; saveLocal(); render();
+    setSync((GH.token?'Sincronizzato ':'Sola lettura · ')+new Date().toLocaleTimeString('it-IT'),'ok');
+  }catch(err){ render(); setSync('Errore lettura: '+err.message,'err'); }
+}
+const ghFields=['owner','repo','branch','path','token'];
+const fld = n => $('gh'+n[0].toUpperCase()+n.slice(1));
+$('btnGh').onclick=()=>{ ghFields.forEach(n=>fld(n).value=GH[n]||''); $('dlgGh').showModal(); };
+$('ghCancel').onclick=()=>$('dlgGh').close();
+$('ghSave').onclick=()=>{ ghFields.forEach(n=>GH[n]=fld(n).value.trim()); GH.on=true; try{localStorage.setItem('ferie_gh',JSON.stringify(GH));}catch(e){} $('dlgGh').close(); refresh(); };
+$('ghOff').onclick=()=>{ GH.on=false; try{localStorage.setItem('ferie_gh',JSON.stringify(GH));}catch(e){} $('dlgGh').close(); refresh(); };
+
+/* ===== EXPORT ===== */
+function download(name, blob){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),1000); }
+$('btnExpCsv').onclick=()=>download('ferie.csv', new Blob([toCSV(DATA)],{type:'text/csv'}));
+$('btnExpXlsx').onclick=()=>{
+  const rows=[['Data','Giorno','Sede','In ferie','Turno assistenza','Copertura']];
+  const start=new Date(cur), end=new Date(cur.getFullYear(), cur.getMonth()+2, 0);
+  for(let d=new Date(start); d<=end; d.setDate(d.getDate()+1)){
+    const k=key(d), ch=chiusura(d), e=DATA[k];
+    rows.push([k, d.toLocaleDateString('it-IT',{weekday:'long'}), ch===null?'Aperto':('Chiuso'+(ch?' – '+ch:'')),
+      (e?.f||[]).join(', '), e?.t||'', ch===null?descrCop(copertura(e)):'']);
+  }
+  const ws=XLSX.utils.aoa_to_sheet(rows); ws['!cols']=[{wch:11},{wch:11},{wch:20},{wch:18},{wch:16},{wch:22}];
+  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Ferie');
+  XLSX.writeFile(wb, `ferie_${key(start).slice(0,7)}.xlsx`);
+};
+
+/* ===== NAVIGAZIONE ===== */
+$('btnInfo').onclick=()=>$('dlgInfo').showModal();
+$('infoClose').onclick=()=>$('dlgInfo').close();
+$('btnRefresh').onclick=refresh;
+$('prev').onclick=()=>{ cur=new Date(cur.getFullYear(),cur.getMonth()-1,1); render(); };
+$('next').onclick=()=>{ cur=new Date(cur.getFullYear(),cur.getMonth()+1,1); render(); };
+window.addEventListener('focus', ()=>{ if(GH.on) refresh(); });
+
+refresh();
+if(!ME) openLogin();
+</script>
+</body>
+</html>
